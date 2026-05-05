@@ -175,14 +175,24 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 .kcard-row { display: flex; align-items: flex-start; gap: 8px; }
 .kcard-text { font-size: 13.5px; line-height: 1.4; color: var(--text); word-break: break-word; flex: 1; cursor: pointer; }
 .kcard-meta { display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap; align-items: center; }
-.kcard-actions { display: flex; gap: 0; opacity: 0; transition: opacity 0.15s; flex-shrink: 0; }
-.kcard:hover .kcard-actions { opacity: 1; }
-.kcard-actions button { background: none; border: none; color: var(--muted-soft); cursor: pointer; padding: 0 3px; font-size: 12px; line-height: 1; }
+.kcard-actions { display: flex; gap: 0; flex-shrink: 0; }
+.kcard-actions button { background: none; border: none; color: var(--muted-soft); cursor: pointer; padding: 0 4px; font-size: 12px; line-height: 1; transition: color 0.15s; }
 .kcard-actions button:hover { color: var(--text); }
 .kcard-check { width: 15px; height: 15px; border: 1.5px solid var(--border-strong); border-radius: 3px; flex-shrink: 0; margin-top: 2px; cursor: pointer; transition: all 0.15s; background: #fff; display: flex; align-items: center; justify-content: center; }
 .kcard-check:hover { border-color: var(--accent); }
 .kcard-check.checked { background: var(--accent); border-color: var(--accent); }
 .kcard-check.checked::after { content: ''; width: 3px; height: 7px; border: 1.5px solid var(--accent-on); border-top: none; border-left: none; transform: rotate(45deg) translate(-1px,-1px); }
+
+/* Sous-tâches dans une carte kanban */
+.kcard.expanded { border-color: var(--border-strong); }
+.kcard-expand { transition: transform 0.2s; }
+.kcard-expand.open { transform: rotate(90deg); }
+.kcard-subpanel { margin-top: 10px; padding-top: 10px; border-top: 1px dashed var(--border); }
+.kcard-subpanel .subtask-item { padding: 4px 0; border-bottom: 1px solid var(--border); }
+.kcard-subpanel .subtask-item:last-of-type { border-bottom: none; }
+.kcard-subpanel .subtask-add { margin-top: 8px; }
+.kcard-subpanel .subtask-add input { font-size: 12px; padding: 6px 9px; }
+.kcard-subpanel .sub-text { font-size: 12.5px; }
 
 /* FAB */
 .fab { position: fixed; bottom: calc(20px + env(safe-area-inset-bottom)); right: 24px; background: var(--accent); color: var(--accent-on); border: none; border-radius: 999px; padding: 0 22px; height: 48px; font-family: var(--font-sans); font-size: 14px; font-weight: 500; cursor: pointer; display: flex; align-items: center; gap: 8px; box-shadow: 0 4px 16px rgba(0,0,0,0.15); z-index: 20; transition: opacity 0.15s, transform 0.15s; }
@@ -400,6 +410,17 @@ function processData(data) {
 async function apiCall(payload) {
   try { await fetch(API, { method: 'POST', body: JSON.stringify({ ...payload, pwd: PWD }) }); } catch(e) {}
 }
+// Pour les actions critiques (suppression, édition) : on attend la réponse et on gère l'échec
+async function apiCallStrict(payload) {
+  try {
+    const r = await fetch(API, { method: 'POST', body: JSON.stringify({ ...payload, pwd: PWD }) });
+    const data = await r.json();
+    if (data && data.error) throw new Error(data.error);
+    return { ok: true, data };
+  } catch(e) {
+    return { ok: false, error: e.message || 'Erreur réseau' };
+  }
+}
 
 function isDone(t) { return t.done === true || t.done === 'TRUE'; }
 function isDeleted(t) { return t.deleted === true || t.deleted === 'TRUE'; }
@@ -586,6 +607,7 @@ function kcardHtml(t) {
   const done = isDone(t);
   const overdue = t.deadline && t.deadline < today && !done;
   const isToday = t.deadline === today && !done;
+  const isExp = expandedId === String(t.id);
   const subs = t._subtasks || [];
   const subsDone = subs.filter(s => s.done).length;
   const dlCls = overdue ? 'overdue' : isToday ? 'today' : '';
@@ -598,17 +620,31 @@ function kcardHtml(t) {
   if (subs.length > 0) meta.push(`<span class="badge badge-sub">${subsDone}/${subs.length}</span>`);
   const metaHtml = meta.length ? `<div class="kcard-meta">${meta.join('')}</div>` : '';
 
+  const subsHtml = subs.map((s,i) => `<div class="subtask-item">
+    <div class="sub-check ${s.done?'checked':''}" onclick="toggleSub('${t.id}',${i})"></div>
+    <span class="sub-text ${s.done?'done':''}">${escHtml(s.text)}</span>
+    <button class="sub-delete" onclick="deleteSub('${t.id}',${i})">×</button>
+  </div>`).join('');
+
   return `<div class="kcard-wrapper" data-id="${t.id}" draggable="true">
-    <div class="kcard ${done?'done':''} ${urgentCls}">
+    <div class="kcard ${done?'done':''} ${urgentCls} ${isExp?'expanded':''}">
       <div class="kcard-row">
         <div class="kcard-check ${done?'checked':''}" onclick="toggleTask('${t.id}')"></div>
-        <div class="kcard-text" onclick="openEdit('${t.id}')">${escHtml(String(t.text||''))}</div>
+        <div class="kcard-text" onclick="toggleExpand('${t.id}')">${escHtml(String(t.text||''))}</div>
         <div class="kcard-actions">
           <button onclick="openEdit('${t.id}')" title="Modifier">✎</button>
           <button onclick="softDelete('${t.id}')" title="Supprimer">×</button>
+          <button class="kcard-expand ${isExp?'open':''}" onclick="toggleExpand('${t.id}')" title="Sous-tâches">▶</button>
         </div>
       </div>
       ${metaHtml}
+      ${isExp ? `<div class="kcard-subpanel">
+        ${subsHtml}
+        <div class="subtask-add">
+          <input type="text" placeholder="Ajouter une sous-tâche..." id="sub-${t.id}" onkeydown="if(event.key==='Enter')addSub('${t.id}')"/>
+          <button onclick="addSub('${t.id}')">+</button>
+        </div>
+      </div>` : ''}
     </div>
   </div>`;
 }
@@ -712,8 +748,20 @@ function openEdit(id) {
 }
 
 async function softDelete(id) {
-  const t=tasks.find(t=>String(t.id)===String(id)); if(t) t.deleted=true;
-  render(); apiCall({action:'soft_delete',id}); showToast('tâche déplacée dans la corbeille');
+  const t = tasks.find(t=>String(t.id)===String(id));
+  if (!t) return;
+  t.deleted = true;
+  render();
+  showToast('suppression...');
+  const res = await apiCallStrict({ action: 'soft_delete', id });
+  if (!res.ok) {
+    // Échec : on restaure l'état local et on prévient
+    t.deleted = false;
+    render();
+    showToast('⚠ échec suppression — vérifie ta connexion');
+    return;
+  }
+  showToast('tâche déplacée dans la corbeille');
 }
 
 async function restoreTask(id) {
