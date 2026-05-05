@@ -96,6 +96,30 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 .task-item.deleted-item { opacity: 0.7; border-color: var(--danger); background: var(--danger-bg); }
 .task-item.urgent-accent { border-left: 3px solid var(--danger); }
 
+/* Coloration progressive selon urgence (en plus du badge) */
+.task-item.urg-overdue { background: linear-gradient(to right, #fef2f2 0%, #fff 8%); }
+.task-item.urg-today { background: linear-gradient(to right, #fff7ed 0%, #fff 8%); }
+.task-item.urg-soon { background: linear-gradient(to right, #fffbeb 0%, #fff 8%); }
+.task-item.urg-week { background: linear-gradient(to right, #fefce8 0%, #fff 6%); }
+.task-item.urg-high:not(.urgent-accent) { background: linear-gradient(to right, #fef2f2 0%, #fff 8%); }
+
+/* Coloration progressive aussi pour les cartes kanban */
+.kcard.urg-overdue { background: #fef7f7; }
+.kcard.kcard.urg-today { background: #fffaf0; }
+.kcard.urg-soon { background: #fffdf5; }
+.kcard.urg-high { background: #fef7f7; }
+
+.pin-btn { background: none; border: none; color: var(--muted-soft); font-size: 16px; cursor: pointer; padding: 0 2px; line-height: 1; flex-shrink: 0; margin-top: 0; transition: color 0.15s, transform 0.15s; }
+.pin-btn:hover { color: #f59e0b; transform: scale(1.15); }
+.pin-btn.pinned { color: #f59e0b; }
+.kcard-pin { background: none; border: none; color: var(--muted-soft); font-size: 13px; cursor: pointer; padding: 0 2px; line-height: 1; }
+.kcard-pin.pinned { color: #f59e0b; }
+
+.badge-recur { background: #ecfdf5; color: var(--success); }
+.badge-note { background: var(--surface2); color: var(--muted); padding: 3px 7px; }
+
+.filter-btn.today-active { background: #f59e0b; color: #fff; border-color: #f59e0b; font-weight: 500; }
+
 .drag-handle { color: var(--muted-soft); font-size: 13px; flex-shrink: 0; cursor: grab; padding: 2px 2px 0; touch-action: none; }
 .drag-handle:hover { color: var(--text-soft); }
 .check-box { width: 18px; height: 18px; border: 1.5px solid var(--border-strong); border-radius: 4px; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.15s; flex-shrink: 0; margin-top: 1px; background: #fff; }
@@ -218,8 +242,13 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 
 .field { margin-bottom: 14px; }
 .field label { font-size: 11px; color: var(--muted); letter-spacing: 0.06em; text-transform: uppercase; display: block; margin-bottom: 6px; font-weight: 500; }
-.field input[type="text"], .field input[type="date"], .field select { width: 100%; background: #fff; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); font-family: var(--font-sans); font-size: 15px; padding: 10px 12px; outline: none; transition: border-color 0.15s; -webkit-appearance: none; appearance: none; }
-.field input:focus, .field select:focus { border-color: var(--accent); }
+.field input[type="text"], .field input[type="date"], .field select, .field textarea { width: 100%; background: #fff; border: 1px solid var(--border-strong); border-radius: var(--radius); color: var(--text); font-family: var(--font-sans); font-size: 15px; padding: 10px 12px; outline: none; transition: border-color 0.15s; -webkit-appearance: none; appearance: none; }
+.field input:focus, .field select:focus, .field textarea:focus { border-color: var(--accent); }
+.field textarea { resize: vertical; min-height: 70px; line-height: 1.4; font-family: var(--font-sans); }
+#meta-info { font-size: 12px; color: var(--muted); margin: 8px 0 14px; padding: 8px 12px; background: var(--surface3); border-radius: 6px; display: none; }
+#meta-info.show { display: block; }
+.delete-btn-modal { width: 100%; height: 40px; background: #fff; color: var(--danger); border: 1px solid var(--danger); border-radius: var(--radius); font-family: var(--font-sans); font-size: 13px; font-weight: 500; cursor: pointer; margin-top: 8px; }
+.delete-btn-modal:hover { background: var(--danger-bg); }
 .field-row { display: flex; gap: 10px; }
 .field-row .field { flex: 1; }
 .mic-row { display: flex; gap: 8px; align-items: flex-end; }
@@ -314,7 +343,19 @@ mark { background: #fef08a; color: inherit; border-radius: 2px; padding: 0 2px; 
       </div>
     </div>
     <div class="field"><label>Date limite (optionnel)</label><input type="date" id="deadline-input" /></div>
+    <div class="field">
+      <label>Récurrence (optionnel)</label>
+      <select id="recur-input">
+        <option value="">Aucune</option>
+        <option value="daily">Quotidienne</option>
+        <option value="weekly">Hebdomadaire</option>
+        <option value="monthly">Mensuelle</option>
+      </select>
+    </div>
+    <div class="field"><label>Notes</label><textarea id="notes-input" placeholder="Détails, contexte, liens..." rows="3"></textarea></div>
+    <div id="meta-info"></div>
     <button class="submit-btn" id="submit-btn">Ajouter</button>
+    <button class="delete-btn-modal" id="delete-btn-modal" style="display:none">Supprimer cette tâche</button>
   </div>
 </div>
 
@@ -340,7 +381,7 @@ const PWD_KEY = 'todo_pwd_v1';
 let PWD = '';
 let tasks = [];
 let categories = [];
-let filter = 'all';
+let filter = 'today';
 let searchQuery = '';
 let expandedId = null;
 const today = new Date().toISOString().split('T')[0];
@@ -433,8 +474,8 @@ function isDeleted(t) { return t.deleted === true || t.deleted === 'TRUE'; }
 // --- Filters ---
 function renderFilters() {
   const staticFilters = [
+    { key: 'today', label: '★ Aujourd\'hui' },
     { key: 'all', label: 'Toutes' },
-    { key: 'focus', label: '⚡ Focus' },
     { key: 'active', label: 'À faire' },
     { key: 'done', label: 'Faites' },
   ];
@@ -445,7 +486,7 @@ function renderFilters() {
   const container = document.getElementById('filters-container');
   container.innerHTML = all.map(f => {
     const isActive = filter === f.key;
-    const cls = isActive ? (f.key === 'focus' ? 'focus-active' : f.key === 'trash' ? 'trash-active' : 'active') : '';
+    const cls = isActive ? (f.key === 'today' ? 'today-active' : f.key === 'trash' ? 'trash-active' : 'active') : '';
     return `<button class="filter-btn ${cls}" data-filter="${f.key}">${f.label}</button>`;
   }).join('');
 
@@ -470,7 +511,13 @@ function getVisible() {
   let v = tasks.filter(t => !isDeleted(t));
   if (filter === 'active') v = v.filter(t => !isDone(t));
   else if (filter === 'done') v = v.filter(t => isDone(t));
-  else if (filter === 'focus') v = v.filter(t => !isDone(t) && (t.priority === 'high' || dateOnly(t.deadline) === today));
+  else if (filter === 'today') {
+    v = v.filter(t => !isDone(t) && (
+      t.priority === 'high' ||                                 // urgentes
+      (t.deadline && dateOnly(t.deadline) <= today) ||         // deadline auj ou passée
+      isPinned(t)                                              // épinglées manuellement
+    ));
+  }
   else if (filter !== 'all') v = v.filter(t => t.cat === filter);
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
@@ -481,6 +528,66 @@ function getVisible() {
     });
   }
   return v;
+}
+
+// Pinning: stocké dans localStorage en attendant qu'on étende le backend
+function getPins() { try { return JSON.parse(localStorage.getItem('todo_pins_v1') || '[]'); } catch { return []; } }
+function isPinned(t) { return getPins().includes(String(t.id)); }
+function togglePin(id) {
+  const id_s = String(id);
+  let pins = getPins();
+  if (pins.includes(id_s)) pins = pins.filter(x => x !== id_s);
+  else pins.push(id_s);
+  localStorage.setItem('todo_pins_v1', JSON.stringify(pins));
+  render();
+  showToast(pins.includes(id_s) ? '★ épinglée pour aujourd\'hui' : 'désépinglée');
+}
+
+// Notes longues: stockées dans localStorage en attendant qu'on étende le backend
+function getNotes() { try { return JSON.parse(localStorage.getItem('todo_notes_v1') || '{}'); } catch { return {}; } }
+function getNote(id) { return getNotes()[String(id)] || ''; }
+function setNote(id, txt) {
+  const notes = getNotes();
+  if (txt) notes[String(id)] = txt; else delete notes[String(id)];
+  localStorage.setItem('todo_notes_v1', JSON.stringify(notes));
+}
+
+// Récurrence: stockée dans localStorage en attendant qu'on étende le backend
+function getRecurrences() { try { return JSON.parse(localStorage.getItem('todo_recur_v1') || '{}'); } catch { return {}; } }
+function getRecurrence(id) { return getRecurrences()[String(id)] || ''; }
+function setRecurrence(id, val) {
+  const r = getRecurrences();
+  if (val) r[String(id)] = val; else delete r[String(id)];
+  localStorage.setItem('todo_recur_v1', JSON.stringify(r));
+}
+// Calcule la prochaine deadline pour une tâche récurrente
+function nextOccurrence(currentDeadline, recurType) {
+  const base = currentDeadline ? new Date(dateOnly(currentDeadline) + 'T12:00:00') : new Date();
+  if (recurType === 'daily') base.setDate(base.getDate() + 1);
+  else if (recurType === 'weekly') base.setDate(base.getDate() + 7);
+  else if (recurType === 'monthly') base.setMonth(base.getMonth() + 1);
+  else return '';
+  return base.toISOString().slice(0, 10);
+}
+
+function recurLabel(r) {
+  return r === 'daily' ? 'quotidien' : r === 'weekly' ? 'hebdo' : r === 'monthly' ? 'mensuel' : '';
+}
+// Calcule la classe de fond selon l'urgence (pour la coloration progressive)
+// daysToDeadline: nb de jours avant deadline (négatif = en retard)
+function urgencyBgClass(t, done) {
+  if (done || isDeleted(t)) return '';
+  const dl = dateOnly(t.deadline);
+  if (!dl) return t.priority === 'high' ? 'urg-high' : '';
+  // Calcul en jours
+  const todayDate = new Date(today + 'T12:00:00');
+  const dlDate = new Date(dl + 'T12:00:00');
+  const diff = Math.round((dlDate - todayDate) / (1000 * 60 * 60 * 24));
+  if (diff < 0) return 'urg-overdue';     // en retard : rouge
+  if (diff === 0) return 'urg-today';     // aujourd'hui : orange foncé
+  if (diff <= 2) return 'urg-soon';       // 1-2 jours : orange clair
+  if (diff <= 7) return 'urg-week';       // semaine : jaune très léger
+  return '';                              // > 1 semaine : neutre
 }
 
 function formatDate(d) {
@@ -578,12 +685,17 @@ function render() {
     }
 
     const urgentCls = (t.priority === 'high' && !done) ? 'urgent-accent' : '';
+    const urgencyBg = urgencyBgClass(t, done);
+    const pinned = isPinned(t);
+    const note = getNote(t.id);
+    const recur = getRecurrence(t.id);
     return `<div class="task-wrapper" data-id="${t.id}" draggable="true">
       <div class="swipe-container">
         <div class="swipe-delete-bg">corbeille</div>
-        <div class="task-item ${done?'done':''} ${isExp?'expanded':''} ${urgentCls}">
+        <div class="task-item ${done?'done':''} ${isExp?'expanded':''} ${urgentCls} ${urgencyBg}">
           <span class="drag-handle">⠿</span>
           <div class="check-box ${done?'checked':''}" onclick="toggleTask('${t.id}')"></div>
+          <button class="pin-btn ${pinned?'pinned':''}" onclick="togglePin('${t.id}')" title="${pinned?'Désépingler':'Épingler aujourd&rsquo;hui'}">${pinned?'★':'☆'}</button>
           <div class="task-body" onclick="toggleExpand('${t.id}')">
             <div class="task-text">${highlight(escHtml(String(t.text||'')), searchQuery)}</div>
             <div class="task-meta">
@@ -592,6 +704,8 @@ function render() {
               ${t.priority==='low'?'<span class="badge badge-low">low</span>':''}
               ${t.deadline?`<span class="deadline-badge ${dlCls}">◷ ${formatDate(t.deadline)}</span>`:''}
               ${subs.length>0?`<span class="badge badge-sub">${subsDone}/${subs.length}</span>`:''}
+              ${recur?`<span class="badge badge-recur" title="Récurrence: ${recur}">↻ ${recurLabel(recur)}</span>`:''}
+              ${note?`<span class="badge badge-note" title="Cette tâche a une note">📝</span>`:''}
             </div>
           </div>
           <button class="edit-btn" onclick="openEdit('${t.id}')" title="Modifier">✎</button>
@@ -623,12 +737,18 @@ function kcardHtml(t) {
   const subsDone = subs.filter(s => s.done).length;
   const dlCls = overdue ? 'overdue' : isToday ? 'today' : '';
   const urgentCls = (t.priority === 'high' && !done) ? 'urgent-accent' : '';
+  const urgencyBg = urgencyBgClass(t, done);
+  const pinned = isPinned(t);
+  const note = getNote(t.id);
+  const recur = getRecurrence(t.id);
 
   const meta = [];
   if (t.priority === 'high') meta.push('<span class="badge badge-high">urgent</span>');
   if (t.priority === 'low') meta.push('<span class="badge badge-low">low</span>');
   if (t.deadline) meta.push(`<span class="deadline-badge ${dlCls}">◷ ${formatDate(t.deadline)}</span>`);
   if (subs.length > 0) meta.push(`<span class="badge badge-sub">${subsDone}/${subs.length}</span>`);
+  if (recur) meta.push(`<span class="badge badge-recur">↻ ${recurLabel(recur)}</span>`);
+  if (note) meta.push(`<span class="badge badge-note" title="A une note">📝</span>`);
   const metaHtml = meta.length ? `<div class="kcard-meta">${meta.join('')}</div>` : '';
 
   const subsHtml = subs.map((s,i) => `<div class="subtask-item">
@@ -638,9 +758,10 @@ function kcardHtml(t) {
   </div>`).join('');
 
   return `<div class="kcard-wrapper" data-id="${t.id}" draggable="true">
-    <div class="kcard ${done?'done':''} ${urgentCls} ${isExp?'expanded':''}">
+    <div class="kcard ${done?'done':''} ${urgentCls} ${urgencyBg} ${isExp?'expanded':''}">
       <div class="kcard-row">
         <div class="kcard-check ${done?'checked':''}" onclick="toggleTask('${t.id}')"></div>
+        <button class="kcard-pin ${pinned?'pinned':''}" onclick="togglePin('${t.id}')" title="${pinned?'Désépingler':'Épingler'}">${pinned?'★':'☆'}</button>
         <div class="kcard-text" onclick="toggleExpand('${t.id}')">${escHtml(String(t.text||''))}</div>
         <div class="kcard-actions">
           <button onclick="openEdit('${t.id}')" title="Modifier">✎</button>
@@ -750,7 +871,29 @@ window.addEventListener('resize', () => {
 // --- Task actions ---
 async function toggleTask(id) {
   const t=tasks.find(t=>String(t.id)===String(id));
-  if(t){t.done=isDone(t)?false:true; render(); apiCall({action:'toggle',id});}
+  if(!t) return;
+  const wasDone = isDone(t);
+  t.done = wasDone ? false : true;
+  render();
+  apiCall({action:'toggle',id});
+  // Si on vient de cocher une tâche récurrente, créer la prochaine occurrence
+  if (!wasDone && t.done) {
+    const recur = getRecurrence(id);
+    if (recur) {
+      const nextDl = nextOccurrence(t.deadline, recur);
+      const newId = Date.now();
+      const newTask = { action:'add', id:newId, text:t.text, cat:t.cat, priority:t.priority||'normal', deadline:nextDl, date:today };
+      newTask._subtasks = [];
+      tasks.unshift(newTask);
+      // Conserver la récurrence et la note sur la nouvelle occurrence
+      setRecurrence(newId, recur);
+      const note = getNote(id);
+      if (note) setNote(newId, note);
+      render();
+      apiCall(newTask);
+      showToast(`prochaine occurrence le ${formatDate(nextDl)}`);
+    }
+  }
 }
 
 function toggleExpand(id) { expandedId=expandedId===String(id)?null:String(id); render(); }
@@ -761,11 +904,36 @@ function openEdit(id) {
   document.getElementById('modal-title').textContent='Modifier la tâche';
   document.getElementById('task-input').value=t.text||'';
   document.getElementById('priority-input').value=t.priority||'normal';
-  document.getElementById('deadline-input').value=t.deadline||'';
+  // deadline normalisée en YYYY-MM-DD pour input[type=date]
+  document.getElementById('deadline-input').value=dateOnly(t.deadline)||'';
+  document.getElementById('recur-input').value=getRecurrence(id)||'';
+  document.getElementById('notes-input').value=getNote(id)||'';
   populateCatSelect();
   document.getElementById('cat-input').value=t.cat||'';
   document.getElementById('submit-btn').textContent='Enregistrer';
+  // Meta-info : date de création, statuts
+  const created = t.date ? `Créée le ${formatDate(t.date)}` : '';
+  const ageStr = t.date ? ageLabel(t.date) : '';
+  const subs = t._subtasks || [];
+  const subsLabel = subs.length ? ` · ${subs.filter(s=>s.done).length}/${subs.length} sous-tâches` : '';
+  const metaEl = document.getElementById('meta-info');
+  metaEl.textContent = [created, ageStr, subsLabel].filter(Boolean).join(' · ');
+  metaEl.classList.toggle('show', !!created);
+  document.getElementById('delete-btn-modal').style.display='block';
+  document.getElementById('delete-btn-modal').onclick = () => { closeModal(); softDelete(id); };
   document.getElementById('modal').classList.add('open');
+}
+function ageLabel(dateStr) {
+  const d = dateOnly(dateStr); if (!d) return '';
+  const created = new Date(d + 'T12:00:00');
+  const todayDate = new Date(today + 'T12:00:00');
+  const days = Math.round((todayDate - created) / (1000*60*60*24));
+  if (days <= 0) return 'aujourd\'hui';
+  if (days === 1) return 'il y a 1 jour';
+  if (days < 30) return `il y a ${days} jours`;
+  if (days < 60) return 'il y a ~1 mois';
+  if (days < 365) return `il y a ${Math.round(days/30)} mois`;
+  return `il y a ${Math.round(days/365)} an${days>=730?'s':''}`;
 }
 
 async function softDelete(id) {
@@ -945,43 +1113,58 @@ searchClear.onclick=()=>{searchInput.value='';searchQuery='';searchClear.style.d
 
 // --- Task modal ---
 const modal=document.getElementById('modal');
-document.getElementById('fab-btn').onclick=()=>{
+function closeModal() { modal.classList.remove('open'); }
+function resetModalFields() {
   document.getElementById('edit-id').value='';
-  document.getElementById('modal-title').textContent='Nouvelle tâche';
   document.getElementById('task-input').value='';
   document.getElementById('priority-input').value='normal';
   document.getElementById('deadline-input').value='';
+  document.getElementById('recur-input').value='';
+  document.getElementById('notes-input').value='';
+  document.getElementById('meta-info').classList.remove('show');
+  document.getElementById('meta-info').textContent='';
+  document.getElementById('delete-btn-modal').style.display='none';
+}
+
+document.getElementById('fab-btn').onclick=()=>{
+  resetModalFields();
+  document.getElementById('modal-title').textContent='Nouvelle tâche';
   document.getElementById('submit-btn').textContent='Ajouter';
   populateCatSelect();
   modal.classList.add('open');
   setTimeout(()=>document.getElementById('task-input').focus(),300);
 };
-modal.addEventListener('click',e=>{if(e.target===modal)modal.classList.remove('open');});
+modal.addEventListener('click',e=>{if(e.target===modal)closeModal();});
 
 document.getElementById('submit-btn').onclick=async()=>{
   const text=document.getElementById('task-input').value.trim();if(!text) return;
   const cat=document.getElementById('cat-input').value;
   const priority=document.getElementById('priority-input').value;
   const deadline=document.getElementById('deadline-input').value;
+  const notes=document.getElementById('notes-input').value.trim();
+  const recur=document.getElementById('recur-input').value;
   const editId=document.getElementById('edit-id').value;
   const btn=document.getElementById('submit-btn');btn.disabled=true;btn.textContent='...';
   if(editId){
     const t=tasks.find(t=>String(t.id)===String(editId));
     if(t){t.text=text;t.cat=cat;t.priority=priority;t.deadline=deadline;}
+    setNote(editId, notes);
+    setRecurrence(editId, recur);
     render();
     await apiCall({action:'update',id:editId,text,cat,priority,deadline});
     showToast('tâche modifiée');
   } else {
-    const task={action:'add',id:Date.now(),text,cat,priority,deadline,date:today};
-    task._subtasks=[];tasks.unshift(task);render();
+    const id = Date.now();
+    const task={action:'add',id,text,cat,priority,deadline,date:today};
+    task._subtasks=[];tasks.unshift(task);
+    setNote(id, notes);
+    setRecurrence(id, recur);
+    render();
     await apiCall(task);showToast('tâche ajoutée');
   }
   btn.disabled=false;btn.textContent=editId?'Enregistrer':'Ajouter';
-  document.getElementById('task-input').value='';
-  document.getElementById('deadline-input').value='';
-  document.getElementById('priority-input').value='normal';
-  document.getElementById('edit-id').value='';
-  modal.classList.remove('open');
+  resetModalFields();
+  closeModal();
 };
 
 // --- Settings modal ---
