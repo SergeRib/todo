@@ -384,7 +384,22 @@ let categories = [];
 let filter = 'today';
 let searchQuery = '';
 let expandedId = null;
-const today = new Date().toISOString().split('T')[0];
+// today recalculé en timezone Europe/Paris pour éviter les dérives autour de minuit
+function computeToday() {
+  // Intl.DateTimeFormat avec timezone Europe/Paris donne le jour local correct
+  const parts = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Europe/Paris' }).format(new Date());
+  // sv-SE produit YYYY-MM-DD nativement
+  return parts;
+}
+let today = computeToday();
+// Recalcul périodique (toutes les 5 min) pour ne pas dériver sur une page laissée ouverte
+setInterval(() => {
+  const newToday = computeToday();
+  if (newToday !== today) {
+    today = newToday;
+    if (typeof render === 'function' && document.getElementById('app').style.display !== 'none') render();
+  }
+}, 5 * 60 * 1000);
 
 // --- Auth ---
 function initAuth() {
@@ -453,19 +468,35 @@ function processData(data) {
   render();
 }
 
-async function apiCall(payload) {
-  try { await fetch(API, { method: 'POST', body: JSON.stringify({ ...payload, pwd: PWD }) }); } catch(e) {}
-}
-// Pour les actions critiques (suppression, édition) : on attend la réponse et on gère l'échec
-async function apiCallStrict(payload) {
-  try {
-    const r = await fetch(API, { method: 'POST', body: JSON.stringify({ ...payload, pwd: PWD }) });
-    const data = await r.json();
-    if (data && data.error) throw new Error(data.error);
-    return { ok: true, data };
-  } catch(e) {
-    return { ok: false, error: e.message || 'Erreur réseau' };
+async function apiCall(payload, opts = {}) {
+  const maxRetries = opts.retries ?? 2;
+  let lastErr;
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      const r = await fetch(API, { method: 'POST', body: JSON.stringify({ ...payload, pwd: PWD }) });
+      // Apps Script renvoie souvent text/plain, on parse défensivement
+      const text = await r.text();
+      let data = null;
+      try { data = JSON.parse(text); } catch {}
+      if (data && data.error) throw new Error(data.error);
+      return data || { ok: true };
+    } catch (e) {
+      lastErr = e;
+      if (attempt < maxRetries) {
+        // Backoff exponentiel : 500ms, 1500ms
+        await new Promise(r => setTimeout(r, 500 * (attempt + 1) * (attempt + 1)));
+      }
+    }
   }
+  // Échec après tous les retries : on prévient discrètement l'utilisateur
+  console.error('apiCall échec après retries:', payload.action, lastErr);
+  if (!opts.silent) showToast(`⚠ échec ${payload.action} — réessaye plus tard`);
+  return { ok: false, error: lastErr?.message || 'erreur réseau' };
+}
+// Version stricte qui attend explicitement la confirmation (utilisée par softDelete)
+async function apiCallStrict(payload) {
+  const res = await apiCall(payload, { silent: true, retries: 1 });
+  return res.ok !== false ? { ok: true, data: res } : { ok: false, error: res.error };
 }
 
 function isDone(t) { return t.done === true || t.done === 'TRUE'; }
@@ -487,7 +518,7 @@ function renderFilters() {
   container.innerHTML = all.map(f => {
     const isActive = filter === f.key;
     const cls = isActive ? (f.key === 'today' ? 'today-active' : f.key === 'trash' ? 'trash-active' : 'active') : '';
-    return `<button class="filter-btn ${cls}" data-filter="${f.key}">${f.label}</button>`;
+    return `<button class="filter-btn ${cls}" data-filter="${escHtml(f.key)}">${escHtml(f.label)}</button>`;
   }).join('');
 
   container.querySelectorAll('.filter-btn').forEach(btn => {
@@ -502,7 +533,7 @@ function populateCatSelect() {
   const sel = document.getElementById('cat-input');
   if (!sel) return;
   const cur = sel.value;
-  sel.innerHTML = categories.map(c => `<option value="${c.name}">${c.name}</option>`).join('');
+  sel.innerHTML = categories.map(c => `<option value="${escHtml(c.name)}">${escHtml(c.name)}</option>`).join('');
   if (cur) sel.value = cur;
 }
 
@@ -999,9 +1030,9 @@ async function deleteSub(id,idx) {
 function renderCatList() {
   document.getElementById('cat-list').innerHTML = categories.map(c => `
     <div class="cat-item">
-      <div class="cat-dot" style="background:${c.color}"></div>
+      <div class="cat-dot" style="background:${escHtml(c.color)}"></div>
       <span class="cat-name">${escHtml(c.name)}</span>
-      <button class="cat-delete-btn" onclick="deleteCategory('${c.name}')">×</button>
+      <button class="cat-delete-btn" onclick="deleteCategory('${escHtml(c.name).replace(/'/g, '&#39;')}')">×</button>
     </div>`).join('');
 }
 
