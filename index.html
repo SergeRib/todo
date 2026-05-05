@@ -156,10 +156,13 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* ===== MODE KANBAN (desktop ≥ 900px, filtre "all") ===== */
-.kanban-grid { display: grid; gap: 14px; padding: 16px 0; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); }
+.kanban-grid { display: grid; gap: 14px; padding: 16px 0; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+/* Très grand écran : on autorise jusqu'à 5 colonnes */
+@media (min-width: 1400px) { .kanban-grid { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); } }
 .kanban-col { background: var(--surface3); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 12px; min-height: 200px; display: flex; flex-direction: column; transition: background 0.15s, border-color 0.15s; }
 .kanban-col.drop-target { background: #f0f9ff; border-color: var(--info); }
-.kanban-col-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 4px; }
+.kanban-col-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; padding: 0 4px; cursor: pointer; user-select: none; transition: opacity 0.15s; }
+.kanban-col-head:hover { opacity: 0.7; }
 .kanban-col-name { font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; }
 .kanban-col-count { font-size: 11px; color: var(--muted); background: #fff; border: 1px solid var(--border); border-radius: 999px; padding: 1px 8px; min-width: 22px; text-align: center; font-weight: 500; }
 .kanban-col-body { display: flex; flex-direction: column; gap: 6px; flex: 1; }
@@ -175,9 +178,11 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 .kcard-row { display: flex; align-items: flex-start; gap: 8px; }
 .kcard-text { font-size: 13.5px; line-height: 1.4; color: var(--text); word-break: break-word; flex: 1; cursor: pointer; }
 .kcard-meta { display: flex; gap: 5px; margin-top: 5px; flex-wrap: wrap; align-items: center; }
-.kcard-actions { display: flex; gap: 0; flex-shrink: 0; }
-.kcard-actions button { background: none; border: none; color: var(--muted-soft); cursor: pointer; padding: 0 4px; font-size: 12px; line-height: 1; transition: color 0.15s; }
+.kcard-actions { display: flex; gap: 0; flex-shrink: 0; align-items: center; }
+.kcard-actions button { background: none; border: none; color: var(--muted-soft); cursor: pointer; padding: 2px 4px; font-size: 12px; line-height: 1; transition: color 0.15s; }
 .kcard-actions button:hover { color: var(--text); }
+/* Sur cartes très étroites, on cache × (swipe-équivalent moins indispensable que ✎ et ▶) */
+@media (max-width: 1100px) { .kcard-actions button.hide-narrow { display: none; } }
 .kcard-check { width: 15px; height: 15px; border: 1.5px solid var(--border-strong); border-radius: 3px; flex-shrink: 0; margin-top: 2px; cursor: pointer; transition: all 0.15s; background: #fff; display: flex; align-items: center; justify-content: center; }
 .kcard-check:hover { border-color: var(--accent); }
 .kcard-check.checked { background: var(--accent); border-color: var(--accent); }
@@ -445,12 +450,7 @@ function renderFilters() {
   }).join('');
 
   container.querySelectorAll('.filter-btn').forEach(btn => {
-    btn.onclick = () => {
-      filter = btn.dataset.filter;
-      document.getElementById('fab-btn').classList.toggle('hidden', filter === 'trash');
-      renderFilters();
-      render();
-    };
+    btn.onclick = () => setFilter(btn.dataset.filter);
   });
 
   document.getElementById('fab-btn').classList.toggle('hidden', filter === 'trash');
@@ -470,7 +470,7 @@ function getVisible() {
   let v = tasks.filter(t => !isDeleted(t));
   if (filter === 'active') v = v.filter(t => !isDone(t));
   else if (filter === 'done') v = v.filter(t => isDone(t));
-  else if (filter === 'focus') v = v.filter(t => !isDone(t) && (t.priority === 'high' || t.deadline === today));
+  else if (filter === 'focus') v = v.filter(t => !isDone(t) && (t.priority === 'high' || dateOnly(t.deadline) === today));
   else if (filter !== 'all') v = v.filter(t => t.cat === filter);
   if (searchQuery) {
     const q = searchQuery.toLowerCase();
@@ -483,7 +483,16 @@ function getVisible() {
   return v;
 }
 
-function formatDate(d) { if(!d) return ''; const [y,m,day]=d.split('-'); return `${day}/${m}/${y.slice(2)}`; }
+function formatDate(d) {
+  if (!d) return '';
+  // Extrait juste la partie date si c'est un ISO datetime (ex: "2026-03-16T23:00:00.000Z")
+  const datePart = String(d).slice(0, 10);
+  const [y, m, day] = datePart.split('-');
+  if (!y || !m || !day) return '';
+  return `${day}/${m}/${y.slice(2)}`;
+}
+// Normalise toute deadline en YYYY-MM-DD (ignore timezone)
+function dateOnly(d) { return d ? String(d).slice(0, 10) : ''; }
 function escHtml(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
 function highlight(t, q) {
   if (!q) return t;
@@ -533,8 +542,9 @@ function render() {
 
   const html = visible.map(t => {
     const done = isDone(t);
-    const overdue = t.deadline && t.deadline < today && !done;
-    const isToday = t.deadline === today && !done;
+    const dl = dateOnly(t.deadline);
+    const overdue = dl && dl < today && !done;
+    const isToday = dl === today && !done;
     const isExp = expandedId === String(t.id);
     const subs = t._subtasks || [];
     const subsDone = subs.filter(s => s.done).length;
@@ -605,8 +615,9 @@ function render() {
 // --- Kanban (desktop) ---
 function kcardHtml(t) {
   const done = isDone(t);
-  const overdue = t.deadline && t.deadline < today && !done;
-  const isToday = t.deadline === today && !done;
+  const dl = dateOnly(t.deadline);
+  const overdue = dl && dl < today && !done;
+  const isToday = dl === today && !done;
   const isExp = expandedId === String(t.id);
   const subs = t._subtasks || [];
   const subsDone = subs.filter(s => s.done).length;
@@ -633,7 +644,7 @@ function kcardHtml(t) {
         <div class="kcard-text" onclick="toggleExpand('${t.id}')">${escHtml(String(t.text||''))}</div>
         <div class="kcard-actions">
           <button onclick="openEdit('${t.id}')" title="Modifier">✎</button>
-          <button onclick="softDelete('${t.id}')" title="Supprimer">×</button>
+          <button class="hide-narrow" onclick="softDelete('${t.id}')" title="Supprimer">×</button>
           <button class="kcard-expand ${isExp?'open':''}" onclick="toggleExpand('${t.id}')" title="Sous-tâches">▶</button>
         </div>
       </div>
@@ -655,9 +666,10 @@ function renderKanban(visible) {
     const colTasks = visible.filter(t => t.cat === c.name);
     const cards = colTasks.map(kcardHtml).join('');
     const colorDark = darkenHex(c.color, 0.45);
-    return `<div class="kanban-col" data-cat="${escHtml(c.name)}">
-      <div class="kanban-col-head">
-        <span class="kanban-col-name" style="color:${colorDark}">${escHtml(c.name)}</span>
+    const escName = escHtml(c.name);
+    return `<div class="kanban-col" data-cat="${escName}">
+      <div class="kanban-col-head" onclick="setFilter('${escName.replace(/'/g, "\\'")}')" title="Voir uniquement ${escName}">
+        <span class="kanban-col-name" style="color:${colorDark}">${escName}</span>
         <span class="kanban-col-count">${colTasks.length}</span>
       </div>
       <div class="kanban-col-body">${cards}</div>
@@ -679,6 +691,15 @@ function renderKanban(visible) {
 
   document.getElementById('task-container').innerHTML = `<div class="kanban-grid">${cols.join('')}</div>`;
   initKanbanDrag();
+}
+
+// Helper appelé depuis les en-têtes de colonne
+function setFilter(name) {
+  filter = name;
+  document.getElementById('fab-btn').classList.toggle('hidden', filter === 'trash');
+  renderFilters();
+  render();
+  window.scrollTo({ top: 0, behavior: 'smooth' });
 }
 
 let kdragSrcId = null;
