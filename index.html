@@ -62,6 +62,17 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 .login-version { font-family: var(--font-mono); font-size: 10px; color: var(--muted-soft); letter-spacing: 0.1em; text-transform: uppercase; margin-top: 32px; text-align: center; }
 
 /* ===== HEADER ===== */
+/* En mode liste, on centre le header pour aligner avec les cartes 720px */
+@media (min-width: 600px) {
+  #app.mode-list .header-top,
+  #app.mode-list .search-wrap,
+  #app.mode-list .filters {
+    max-width: 720px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+}
+
 .header { padding: 18px 4px 14px; position: sticky; top: 0; background: var(--bg); z-index: 10; border-bottom: 1px solid var(--border); }
 .header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .logo { font-family: var(--font-mono); font-size: 12px; color: var(--muted); letter-spacing: 0.15em; }
@@ -85,7 +96,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 .filter-btn.trash-active { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
 
 /* ===== LIST MODE (mobile + filtres spécifiques) ===== */
-.task-list { padding: 14px 0; display: flex; flex-direction: column; gap: 6px; }
+.task-list { padding: 14px 0; display: flex; flex-direction: column; gap: 6px; max-width: 720px; margin: 0 auto; }
 .task-wrapper { position: relative; }
 .task-wrapper.dragging { opacity: 0.4; }
 
@@ -158,7 +169,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 .subtask-add input:focus { border-color: var(--border-strong); }
 .subtask-add button { background: var(--accent); border: none; border-radius: 6px; color: var(--accent-on); font-size: 18px; width: 32px; cursor: pointer; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 
-.trash-banner { margin: 14px 0 10px; background: var(--danger-bg); border: 1px solid var(--danger); border-radius: var(--radius); padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
+.trash-banner { margin: 14px auto 10px; max-width: 720px; background: var(--danger-bg); border: 1px solid var(--danger); border-radius: var(--radius); padding: 10px 14px; display: flex; align-items: center; justify-content: space-between; }
 .trash-banner span { font-size: 13px; color: var(--danger); font-weight: 500; }
 .empty-trash-btn { font-size: 12px; color: var(--danger); background: #fff; border: 1px solid var(--danger); border-radius: 6px; padding: 4px 12px; cursor: pointer; font-weight: 500; }
 .empty-trash-btn:hover { background: var(--danger); color: #fff; }
@@ -846,7 +857,11 @@ function render() {
   const counterEl = document.getElementById('counter');
   counterEl.textContent = active > 0 ? `${active} à faire` : 'tout est fait ✓';
 
-  if (shouldShowKanban()) { renderKanban(visible); return; }
+  // Toggle classe selon le mode pour adapter la largeur du header
+  const isKanban = shouldShowKanban();
+  document.getElementById('app').classList.toggle('mode-list', !isKanban);
+
+  if (isKanban) { renderKanban(visible); return; }
 
   if (!visible.length) {
     const msg = state.filter === 'trash' ? 'corbeille vide' : (state.searchQuery ? `aucun résultat pour "${escHtml(state.searchQuery)}"` : 'aucune tâche ici');
