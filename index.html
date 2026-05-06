@@ -903,6 +903,8 @@ function render() {
           <span class="drag-handle">⠿</span>
           <div class="check-box ${done?'checked':''}" onclick="toggleTask('${t.id}', ${done})"></div>
           <button class="pin-btn ${t.pinned?'pinned':''}" onclick="togglePin('${t.id}', ${t.pinned})" title="${t.pinned?'Désépingler':'Épingler aujourd&rsquo;hui'}">${t.pinned?'★':'☆'}</button>
+          <button class="edit-btn" onclick="openEdit('${t.id}')" title="Modifier">✎</button>
+          <button class="expand-btn ${isExp?'open':''}" onclick="toggleExpand('${t.id}')" title="Sous-tâches">▶</button>
           <div class="task-body" onclick="toggleExpand('${t.id}')">
             <div class="task-text">${highlight(escHtml(t.text || ''), state.searchQuery)}</div>
             <div class="task-meta">
@@ -917,8 +919,6 @@ function render() {
               ${t.snoozedUntil && new Date(t.snoozedUntil) > new Date() ? `<span class="badge badge-snooze">⏸ ${formatDate(t.snoozedUntil)}</span>` : ''}
             </div>
           </div>
-          <button class="edit-btn" onclick="openEdit('${t.id}')" title="Modifier">✎</button>
-          <button class="expand-btn ${isExp?'open':''}" onclick="toggleExpand('${t.id}')">▶</button>
         </div>
       </div>
       <div class="subtask-panel ${isExp?'open':''}">
