@@ -41,7 +41,7 @@
 * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
 body { background: var(--bg); color: var(--text); font-family: var(--font-sans); min-height: 100dvh; overscroll-behavior: none; -webkit-font-smoothing: antialiased; }
 
-#app { max-width: 1100px; margin: 0 auto; padding: 0 20px 100px; }
+#app { width: 100%; margin: 0 auto; padding: 0 24px 100px; }
 @media (max-width: 600px) { #app { padding: 0 12px 100px; } }
 
 /* ===== LOGIN ===== */
@@ -181,6 +181,19 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 
 .kcard-wrapper { position: relative; }
 .kcard-wrapper.dragging { opacity: 0.4; }
+.kcard-wrapper.drop-above::before,
+.kcard-wrapper.drop-below::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0;
+  height: 3px;
+  background: var(--info);
+  border-radius: 2px;
+  z-index: 5;
+  pointer-events: none;
+}
+.kcard-wrapper.drop-above::before { top: -4px; }
+.kcard-wrapper.drop-below::after { bottom: -4px; }
 .kcard { background: #fff; border: 1px solid var(--border); border-radius: var(--radius); padding: 9px 11px; cursor: grab; transition: border-color 0.15s, box-shadow 0.15s; position: relative; }
 .kcard:hover { border-color: var(--border-strong); box-shadow: 0 1px 3px rgba(0,0,0,0.04); }
 .kcard.urgent-accent { border-left: 3px solid var(--danger); padding-left: 8px; }
@@ -981,8 +994,19 @@ function kcardHtml(t) {
 function renderKanban(visible) {
   // En kanban on filtre les sous-tâches du listing principal
   const rootsOnly = visible.filter(t => !t.parentTaskId);
+  // Tri : tâches non-faites d'abord (par order, puis createdAt desc), tâches faites en bas
+  const sortColTasks = (tasks) => tasks.slice().sort((a, b) => {
+    // Faites en bas
+    if (a.done !== b.done) return a.done ? 1 : -1;
+    // Puis par order croissant
+    const oa = a.order ?? 0, ob = b.order ?? 0;
+    if (oa !== ob) return oa - ob;
+    // Puis par createdAt décroissant (récent d'abord)
+    return new Date(b.createdAt || 0) - new Date(a.createdAt || 0);
+  });
+
   const cols = state.categories.filter(c => !c.archived).map(c => {
-    const colTasks = rootsOnly.filter(t => t.categoryId === c.id);
+    const colTasks = sortColTasks(rootsOnly.filter(t => t.categoryId === c.id));
     const cards = colTasks.map(kcardHtml).join('');
     const colorDark = darkenHex(c.color, 0.45);
     const escName = escHtml(c.name);
@@ -995,7 +1019,7 @@ function renderKanban(visible) {
     </div>`;
   });
   // Sans catégorie
-  const noCat = rootsOnly.filter(t => !t.categoryId);
+  const noCat = sortColTasks(rootsOnly.filter(t => !t.categoryId));
   if (noCat.length > 0) {
     const cards = noCat.map(kcardHtml).join('');
     cols.push(`<div class="kanban-col" data-cat-id="">
@@ -1389,7 +1413,7 @@ function initListDrag() {
 }
 
 // ============================================================
-// DRAG & DROP KANBAN (changer catégorie)
+// DRAG & DROP KANBAN (changer catégorie + réordonner intra-colonne)
 // ============================================================
 let _kdrag = null;
 function initKanbanDrag() {
@@ -1402,37 +1426,112 @@ function initKanbanDrag() {
     el.addEventListener('dragend', () => {
       el.classList.remove('dragging');
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drop-target'));
+      document.querySelectorAll('.kcard-wrapper').forEach(c => c.classList.remove('drop-above','drop-below'));
+    });
+
+    // Drop sur une autre carte → réordonnement intra-colonne (ou cross-colonne avec changement de cat)
+    el.addEventListener('dragover', e => {
+      if (!_kdrag || _kdrag === el.dataset.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = el.getBoundingClientRect();
+      const isAbove = (e.clientY - rect.top) < rect.height / 2;
+      document.querySelectorAll('.kcard-wrapper').forEach(c => c.classList.remove('drop-above','drop-below'));
+      el.classList.add(isAbove ? 'drop-above' : 'drop-below');
+    });
+    el.addEventListener('dragleave', () => {
+      el.classList.remove('drop-above','drop-below');
+    });
+    el.addEventListener('drop', async e => {
+      if (!_kdrag || _kdrag === el.dataset.id) return;
+      e.preventDefault();
+      e.stopPropagation();
+      const rect = el.getBoundingClientRect();
+      const isAbove = (e.clientY - rect.top) < rect.height / 2;
+      el.classList.remove('drop-above','drop-below');
+      // Trouver la colonne cible
+      const targetCol = el.closest('.kanban-col');
+      const targetCatId = targetCol?.dataset.catId || null;
+      await handleKanbanDrop(_kdrag, targetCatId, el.dataset.id, isAbove);
     });
   });
+
+  // Drop sur une colonne (zone vide ou en bas)
   document.querySelectorAll('.kanban-col').forEach(col => {
     col.addEventListener('dragover', e => {
+      if (!_kdrag) return;
       e.preventDefault();
+      // Si on est sur une carte de la colonne, on laisse l'événement de la carte gérer
+      if (e.target.closest('.kcard-wrapper')) return;
       document.querySelectorAll('.kanban-col').forEach(c => c.classList.remove('drop-target'));
       col.classList.add('drop-target');
     });
-    col.addEventListener('dragleave', e => { if (!col.contains(e.relatedTarget)) col.classList.remove('drop-target'); });
+    col.addEventListener('dragleave', e => {
+      if (!col.contains(e.relatedTarget)) col.classList.remove('drop-target');
+    });
     col.addEventListener('drop', async e => {
+      if (!_kdrag) return;
+      // Si drop sur une carte de la colonne, on a déjà géré au niveau carte
+      if (e.target.closest('.kcard-wrapper')) return;
       e.preventDefault();
       col.classList.remove('drop-target');
-      if (!_kdrag) return;
       const newCatId = col.dataset.catId || null;
-      const idx = state.tasks.findIndex(t => String(t.id) === String(_kdrag));
-      if (idx < 0) return;
-      const oldCatId = state.tasks[idx].categoryId;
-      if (oldCatId === newCatId || (newCatId === '' && !oldCatId)) return;
-      state.tasks[idx].categoryId = newCatId || null;
-      render();
-      try {
-        await api.tasks.update(_kdrag, { categoryId: newCatId || null });
-        const cat = newCatId ? state.categories.find(c => c.id === newCatId) : null;
-        showToast(`déplacé vers ${cat ? cat.name : 'sans catégorie'}`);
-      } catch (e) {
-        state.tasks[idx].categoryId = oldCatId;
-        render();
-        showToast(`⚠ ${e.message}`);
-      }
+      // Drop en fin de colonne : pas de carte de référence
+      await handleKanbanDrop(_kdrag, newCatId, null, false);
     });
   });
+}
+
+// Logique unifiée : déplacer la tâche dans la colonne cible, à la position relative à `refCardId`
+// Si refCardId null → en fin de colonne
+async function handleKanbanDrop(srcId, targetCatId, refCardId, isAbove) {
+  const idx = state.tasks.findIndex(t => String(t.id) === String(srcId));
+  if (idx < 0) return;
+  const src = state.tasks[idx];
+  const oldCatId = src.categoryId || null;
+  const newCatId = targetCatId || null;
+  const catChanged = oldCatId !== newCatId;
+
+  // Calcule le nouvel ordre dans la colonne cible
+  // Tâches actuellement dans la colonne cible (hors la source si elle y était)
+  const colTasks = state.tasks
+    .filter(t => !t.deletedAt && !t.parentTaskId && (t.categoryId || null) === newCatId && String(t.id) !== String(srcId))
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+  // Position d'insertion
+  let insertIdx;
+  if (refCardId) {
+    insertIdx = colTasks.findIndex(t => String(t.id) === String(refCardId));
+    if (insertIdx < 0) insertIdx = colTasks.length;
+    if (!isAbove) insertIdx += 1;
+  } else {
+    insertIdx = colTasks.length;
+  }
+
+  // Update local optimiste
+  src.categoryId = newCatId;
+  // Reconstruit l'ordre de la colonne avec la source insérée
+  const newColOrder = [...colTasks];
+  newColOrder.splice(insertIdx, 0, src);
+  newColOrder.forEach((t, i) => { t.order = i; });
+  render();
+
+  // Persist : update de la catégorie si elle a changé, puis reorder de la colonne
+  try {
+    if (catChanged) {
+      await api.tasks.update(srcId, { categoryId: newCatId });
+    }
+    const reorderItems = newColOrder.map((t, i) => ({ id: t.id, order: i }));
+    await api.tasks.reorder(reorderItems);
+    if (catChanged) {
+      const cat = newCatId ? state.categories.find(c => c.id === newCatId) : null;
+      showToast(`déplacé vers ${cat ? cat.name : 'sans catégorie'}`);
+    }
+  } catch (e) {
+    showToast(`⚠ ${e.message}`);
+    await loadTasks();
+    render();
+  }
 }
 
 // Re-render au resize (bascule liste/kanban)
