@@ -62,17 +62,6 @@ body { background: var(--bg); color: var(--text); font-family: var(--font-sans);
 .login-version { font-family: var(--font-mono); font-size: 10px; color: var(--muted-soft); letter-spacing: 0.1em; text-transform: uppercase; margin-top: 32px; text-align: center; }
 
 /* ===== HEADER ===== */
-/* En mode liste, on centre le header pour aligner avec les cartes 720px */
-@media (min-width: 600px) {
-  #app.mode-list .header-top,
-  #app.mode-list .search-wrap,
-  #app.mode-list .filters {
-    max-width: 720px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-}
-
 .header { padding: 18px 4px 14px; position: sticky; top: 0; background: var(--bg); z-index: 10; border-bottom: 1px solid var(--border); }
 .header-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
 .logo { font-family: var(--font-mono); font-size: 12px; color: var(--muted); letter-spacing: 0.15em; }
@@ -857,11 +846,7 @@ function render() {
   const counterEl = document.getElementById('counter');
   counterEl.textContent = active > 0 ? `${active} à faire` : 'tout est fait ✓';
 
-  // Toggle classe selon le mode pour adapter la largeur du header
-  const isKanban = shouldShowKanban();
-  document.getElementById('app').classList.toggle('mode-list', !isKanban);
-
-  if (isKanban) { renderKanban(visible); return; }
+  if (shouldShowKanban()) { renderKanban(visible); return; }
 
   if (!visible.length) {
     const msg = state.filter === 'trash' ? 'corbeille vide' : (state.searchQuery ? `aucun résultat pour "${escHtml(state.searchQuery)}"` : 'aucune tâche ici');
